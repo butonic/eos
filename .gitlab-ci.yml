@@ -114,22 +114,21 @@ before_script:
 
 .k8s_before_script_template: &k8s_before_script_template
   before_script:
-    - docker images -q | xargs docker rmi || true # remove unused images
     - IMAGE_TAG="${EOS_IMG_BASETAG}${CI_COMMIT_TAG}-${CI_PIPELINE_ID}"
-    - NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_JOB_ID}-${CI_PIPELINE_ID} | tr _ -) # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character
+    - NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_JOB_ID}-${CI_PIPELINE_ID} | tr _ -)
     - . /home/gitlab-runner/coe-cluster-config/env_st-gitlab-k8s-00.sh # get access configs for the cluster
-    - git clone https://gitlab.cern.ch/faluchet/eos-on-k8s.git
+    - git clone https://gitlab.cern.ch/faluchet/eos-on-k8s.git "eos-on-k8s_$NAMESPACE"
 
 
 .k8s_system_test_script_template: &k8s_system_test_script_template
   script:
     # @todo use proper ubuntu image for clients ('-u'), with forwardable keytab(?)  
     - if [[ "$CI_JOB_NAME" == k8s_system_test ]]; then
-        ./eos-on-k8s/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE};
+        ./eos-on-k8s_$NAMESPACE/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE};
       elif [[ "$CI_JOB_NAME" == k8s_ubuntu_system_test ]]; then
-        ./eos-on-k8s/create-all.sh -i ${IMAGE_TAG} -u ${IMAGE_TAG} -n ${NAMESPACE};
+        ./eos-on-k8s_$NAMESPACE/create-all.sh -i ${IMAGE_TAG} -u ${IMAGE_TAG} -n ${NAMESPACE};
       elif [[ "$CI_JOB_NAME" == k8s_system_test_qdb || "$CI_JOB_NAME" == k8s_system_test_qdb_xrd_testing ]]; then
-        ./eos-on-k8s/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE} -q;
+        ./eos-on-k8s_$NAMESPACE/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE} -q;
       fi;
     - kubectl exec -i $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- /bin/bash -c 'eos vid enable krb5;'
     - kubectl exec -i $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- sed -i 's/eos-mq-test.eoscluster.cern.ch/eos-mq/g' /usr/sbin/eos-instance-test-ci # @todo tmp, then re-code the file
@@ -143,10 +142,9 @@ before_script:
 
 .k8s_after_script_template: &k8s_after_script_template
   after_script:
-    - IMAGE_TAG="741270" # @todo here, need a way to pull latest (try with empty string, as latest doesn't work)
     - NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_JOB_ID}-${CI_PIPELINE_ID} | tr _ -) # must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character
     - . /home/gitlab-runner/coe-cluster-config/env_st-gitlab-k8s-00.sh
-    - ./eos-on-k8s/delete-all.sh ${NAMESPACE}
+    - ./eos-on-k8s_$NAMESPACE/delete-all.sh ${NAMESPACE}
     - docker images -q | xargs docker rmi || true # remove unused images
 
 
@@ -163,25 +161,22 @@ k8s_system_test:
     - k8s_node
   allow_failure: true
   retry: 1
-  dependencies:
-    - clone_docker
 
 
-# @todo in ubuntu sys test clients must run ubuntu images
+# @todo use proper ubuntu image for clients ('-u'), with forwardable keytab(?)  
 k8s_ubuntu_system_test:
   stage: test
   <<: *k8s_before_script_template
   <<: *k8s_system_test_script_template
   <<: *k8s_after_script_template
   variables:
+    # EOS_IMG_BASETAG: "ubuntu_client_"
     EOS_IMG_BASETAG: ""
   tags:
     - shell-with-docker
     - k8s_node
   allow_failure: true
   retry: 1
-  dependencies:
-    - clone_docker
   only:
     - dev
     - master
@@ -199,24 +194,22 @@ k8s_system_test_qdb:
     - k8s_node
   allow_failure: true
   retry: 1
-  dependencies:
-    - clone_docker
 
 
+# @todo use proper xrd_testing_ image, with forwardable keytab(?)  
 k8s_system_test_qdb_xrd_testing:
   stage: test
   <<: *k8s_before_script_template
   <<: *k8s_system_test_script_template
   <<: *k8s_after_script_template
   variables:
-    EOS_IMG_BASETAG: "xrd_testing_"
+    # EOS_IMG_BASETAG: "xrd_testing_"
+    EOS_IMG_BASETAG: ""
   tags:
     - shell-with-docker
     - k8s_node
   allow_failure: true
   retry: 1
-  dependencies:
-    - clone_docker
   only:
     - branches
 
@@ -225,7 +218,7 @@ k8s_stress_test:
   stage: test
   <<: *k8s_before_script_template
   script: 
-    - ./create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE}
+    - ./"eos-on-k8s_$NAMESPACE"/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE}
     - kubectl exec -i $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos chmod 2777 /eos/dockertest
     - kubectl exec -i $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- hammer-runner.py --strict-exit-code 1 --gitlab --url eos-mgm.eos-mgm.$NAMESPACE.svc.cluster.local//eos/dockertest/hammer/ --protocols xroot --threads 1 2 10 100 --operations write stat read delete --runs 3 --nfiles 10000
   <<: *k8s_after_script_template
@@ -236,8 +229,7 @@ k8s_stress_test:
     - k8s_node
   allow_failure: true
   retry: 1
-  dependencies:
-    - clone_docker
+
 
 # # @todo must use asan build
 # k8s_unit_test:
@@ -501,6 +493,26 @@ cc7_docker_image_commit:
     - tags
 
 
+cc7_asan_docker_image_commit:
+  stage: build:dockerimage
+  tags:
+    - docker-image-build
+  script:
+    - ""
+  variables:
+    TO: gitlab-registry.cern.ch/dss/eos:asan_${CI_PIPELINE_ID}
+    DOCKER_FILE: eos-docker/Dockerfile_asan
+  dependencies:
+    - build_cc7_asan
+    - clone_docker
+  only:
+    - branches
+  except:
+    - beryl_aquamarine
+    - tags
+  allow_failure: true
+
+
 ubuntu_docker_image_commit:
   stage: build:dockerimage
   tags:
@@ -585,28 +597,6 @@ unit_test:
     - build_cc7_asan
   tags:
     - docker_node
-
-
-# @todo must use asan build
-k8s_unit_test:
-  stage: test
-  script:
-    - export IMAGE_TAG="${CI_PIPELINE_ID}"
-    - export NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_PIPELINE_ID} | tr _ -) # a DNS-1123 label must consist of lower case alphanumeric characters or '-', and must start and end with an alphanumeric character
-    - cd /home/gitlab-runner
-    - . coe-cluster-config/env_st-gitlab-k8s-00.sh
-    - kubectl config view; echo "IMAGE_TAG = $IMAGE_TAG"; echo "NAMESPACE = $NAMESPACE"
-    - rm -rf eos-on-k8s
-    - git clone https://gitlab.cern.ch/faluchet/eos-on-k8s.git; cd eos-on-k8s
-    - all_yaml=(eos-storage-*.yaml); for i in ${all_yaml[@]}; do sed -i "s%gitlab-registry.cern.ch/dss/eos.*%gitlab-registry.cern.ch/dss/eos:${IMAGE_TAG}%g" $i; done
-    - ./create-all.sh ${NAMESPACE}
-    - kubectl exec $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos-unit-tests
-    - kubectl exec $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos-fst-unit-tests
-    - ./delete-all.sh ${NAMESPACE}
-  allow_failure: true
-  tags:
-    - shell-with-docker
-    - k8s_node
 
 
 namespace_unit_test:
