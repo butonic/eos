@@ -114,7 +114,7 @@ before_script:
 
 .k8s_before_script_template: &k8s_before_script_template
   before_script:
-    - IMAGE_TAG="${CI_COMMIT_TAG}-${CI_PIPELINE_ID}"
+    - IMAGE_TAG="${BASETAG}${CI_JOB_ID}-${CI_PIPELINE_ID}"
     - NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_JOB_ID}-${CI_PIPELINE_ID} | tr _ -)
     - . /home/gitlab-runner/coe-cluster-config/env_st-gitlab-k8s-00.sh # get access configs for the cluster
     - git clone https://gitlab.cern.ch/faluchet/eos-on-k8s.git
@@ -150,9 +150,6 @@ before_script:
     - ./eos-on-k8s/delete-all.sh ${NAMESPACE}
     - rm -rf eos-on-k8s/
     - docker images -q | xargs docker rmi || true # remove unused images
-
-
-
 
 
 k8s_system_test:
@@ -201,12 +198,15 @@ k8s_system_test_qdb_xt: # xt stands for xrd_testing. Must shorten to not hit HOS
   <<: *k8s_before_script_template
   <<: *k8s_system_test_script_template
   <<: *k8s_after_script_template
+  variables:
+    BASETAG: "xrd_testing_"
   tags:
     - shell-with-docker
     - k8s_node
   allow_failure: true
   retry: 1
   only:
+    - branches
 
 
 k8s_stress_test:
@@ -224,12 +224,40 @@ k8s_stress_test:
   retry: 1
 
 
+# @todo must use asan build
+k8s_unit_test:
+  stage: test
+  <<: *k8s_before_script_template
+  script:
+    - ./eos-on-k8s/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE}
+    - kubectl exec -n $NAMESPACE -i $(kubectl get pods -n $NAMESPACE --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos-unit-tests
+    - kubectl exec -n $NAMESPACE -i $(kubectl get pods -n $NAMESPACE --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos-fst-unit-tests
+  <<: *k8s_after_script_template
+  variables:
+    BASETAG: "asan_"
+  tags:
+    - shell-with-docker
+    - k8s_node
+  allow_failure: true
+  retry: 1
 
 
-# # @todo must use asan build
-# k8s_unit_test:
-# # @todo must use asan build
-# k8s_namespace_unit_test:
+# @todo must use asan build
+k8s_namespace_unit_test:
+  stage: test
+  <<: *k8s_before_script_template
+  script:
+    - ./eos-on-k8s/create-all.sh -i ${IMAGE_TAG} -n ${NAMESPACE}
+    - kubectl exec -n $NAMESPACE -i $(kubectl get pods -n $NAMESPACE --no-headers -o custom-columns=":metadata.name" -l app=eos-mgm) -- eos-ns-quarkdb-tests
+  <<: *k8s_after_script_template
+  variables:
+    BASETAG: "asan_"
+  tags:
+    - shell-with-docker
+    - k8s_node
+  allow_failure: true
+  retry: 1
+
 
 
 clone_docker:
