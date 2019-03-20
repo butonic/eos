@@ -114,7 +114,7 @@ before_script:
 
 .k8s_before_script_template: &k8s_before_script_template
   before_script:
-    - IMAGE_TAG="${BASETAG}${CI_JOB_ID}-${CI_PIPELINE_ID}"
+    - IMAGE_TAG="${BASETAG}${CI_PIPELINE_ID}"
     - NAMESPACE=$(echo ${CI_JOB_NAME}-${CI_JOB_ID}-${CI_PIPELINE_ID} | tr _ -)
     - . /home/gitlab-runner/coe-cluster-config/env_st-gitlab-k8s-00.sh # get access configs for the cluster
     - git clone https://gitlab.cern.ch/faluchet/eos-on-k8s.git
@@ -525,6 +525,7 @@ cc7_asan_docker_image_commit:
   variables:
     TO: gitlab-registry.cern.ch/dss/eos:asan_${CI_PIPELINE_ID}
     DOCKER_FILE: eos-docker/Dockerfile_asan
+    BUILD_ARG: BRANCH=${BRANCH}
   dependencies:
     - build_cc7_asan
     - clone_docker
